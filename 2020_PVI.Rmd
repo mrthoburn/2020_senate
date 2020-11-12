@@ -1,0 +1,138 @@
+---
+title: "2020 Senate"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Predicting the 2020 Senate Races With the Cook Partisan Voting Index
+
+## Preface
+
+This is a continuation of a previous article I had written before the election (although not published until after as I'm a master procrastinator); if you haven't had a chance to read it yet you can do so [here](https://medium.com/@mthoburn96/predicting-senate-races-with-linear-regression-and-r-f2c0295fc258). As mentioned before, this blogging/data-journalism thing is intended as a way to practice my analytical skills, storytelling, etc., so comments, critiques, and general feedback are always welcome. Results were compiled by hand based on data available on Wikipedia, but it is entirely possible that I've miscalculated or mistyped something. If you see something that doesn't look right let me know so I can correct my numbers accordingly. 
+
+## Introduction
+
+In a previous article I had played around with the idea of trying to predict senate elections using the [Cook Partisan Voting Index](https://en.wikipedia.org/wiki/Cook_Partisan_Voting_Index). While it did show a linear relationship with the overall partisan vote share, there was too much variability in the data to make for a particularly compelling predictive model. However, I would be remiss if I didn't at least see how it fared in the 2020 elections, particularly given the disappointing results for Democrats relative to expectations and the general dissatisfaction with the polling in the election. 
+
+Spoiler: The regression seemed to do relatively well given the inherent variability in elections, but I won't become a celebrity for beating the pollsters quite yet.
+
+## Read the Data
+
+```{r include=FALSE}
+library(GGally)
+```
+
+```{r}
+training.data <- read.table('historic_voting_results.csv',header = TRUE,sep=",")
+training.data$Cycle <- as.factor(training.data$Cycle)
+training.data$Incumbency <- as.factor(training.data$Incumbency)
+training.data$Year <- as.factor(training.data$Year)
+head(training.data)
+
+df <- read.table('2020_results.csv',header = TRUE,sep=",")
+df$Cycle <- as.factor(df$Cycle)
+df$Incumbency <- as.factor(df$Incumbency)
+df$Year <- as.factor(df$Year)
+head(df)
+```
+
+### Explaining the Data
+
+If you haven't had a chance to read the previous installment, a quick recap of the training data is as follows:
+
+The dataset was manually curated based off data from Wikipedia. It contains the State name, the [Cook Partisan Voting Index](https://en.wikipedia.org/wiki/Cook_Partisan_Voting_Index) for each state (expressed as a positive or negative value, with positive values representing democratic leaning states and negative values representing republican leaning states), Year, Cycle (On being a presidential election year and Off being a midterm), Incumbency (1 being an a democratic incumbent, -1 indicating a republican incumbent, and 0 representing an open seat in which neither candidate is an incumbent), and results of US Senate races from 2012 to 2018 (expressed as a difference between the percent vote share of the democratic and republican candidates with positive values indicating a democratic win and negative values indicating a republican win).
+
+Some Result fields were left blank in the event of unusual circumstances such as California's Jungle Primaries (in which two democrats can advance to a runoff in the general), a strong third party (such Angus King from Maine winning as an Independent against both a Democrat and a Republican), or when a candidate runs unopposed (Jeff Sessions of Alabama ran unopposed in 2014 and unsurprisingly won with almost 100% of the vote)
+
+Another feature worth noting is that this data does not cover special elections (such as Doug Jones' upset victory in Alabama in 2017) as special elections are, by their definition special.
+
+The 2020 data contains these fields as well as a column for the expected result as predicted by [FiveThirtyEight's](https://projects.fivethirtyeight.com/2020-election-forecast/senate/) Deluxe senate model. More on that later.
+
+## Train the models
+```{r}
+result.pvi <- lm('Result ~ PVI',training.data)
+summary(result.pvi)
+ggplot(training.data,aes(x=PVI ,y=Result))  + geom_point() + geom_smooth(method = "lm", fill = NA)
+
+result.pvi.incumbency <- lm('Result ~ PVI*Incumbency',training.data)
+summary(result.pvi.incumbency)
+ggplot(training.data,aes(x=PVI,y=Result, col=Incumbency))  + geom_point() + geom_smooth(method = "lm", fill = NA)
+```
+
+A quick (and very simplified) explanation of regression: Regression attempts to quantify the relationship between two or more variables by defining some kind of algebraic relationship (a linear, quadratic, or other function) between them. In our case, we want to find some linear equation $Y = mx+b$ that most closely approximates the relationship between PVI and vote split (A slightly more complicated model is used to include a categorical variable for Incumbency but the general principle is the same). How exactly we arrive at this choice of $m$ and $b$ is unimportant at the moment; we invented computers so we wouldn't have to worry about these things. 
+
+In any event, if a model such as this were to be 100% accurate, expected results would fall perfectly along some kind of line and the regression would have an $R^2$ (A measure of goodness-of-fit) of 1 (100% of the variance in Y can be explained by X) and an RSE (Residual Standard Error) of 0 (no discrepancy on average between expected and actual outcomes). Interpreting the regression visually, a perfect result should have all the data points along the regression line. The more they deviate from it, the worse the regression.
+
+As we can see, the regression incorporating Incumbency gives a better adjusted $R^2$ value (.81 vs .72) and a lower RSE (10.38 vs 12.29) than one that just uses PVI in training. Will that translate to a better predictions with the 2020 elections? That remains to be seen.
+
+## Predict and Calculate Errors
+
+```{r}
+df$Expected.Result.PVI <- round(predict(result.pvi,df),2)
+df$Residuals.PVI <- round(df$Expected.Result.PVI - df$Result,2)
+rse.PVI <- sqrt(sum(df$Residuals.PVI^2,na.rm=T)/(length(df[,1])-2))
+ggplot(training.data,aes(x=PVI,y=Result)) + geom_smooth(method = "lm", fill = NA) + geom_point(data=df,aes(x=PVI,y=Result))
+
+df$Expected.Result.Incumbency <- round(predict(result.pvi.incumbency,df),2)
+df$Residuals.Incumbency <- round(df$Expected.Result.Incumbency - df$Result,2)
+rse.Incumbency <- sqrt(sum(df$Residuals.Incumbency^2,na.rm=T)/(length(df[,1])-2))
+ggplot(training.data,aes(x=PVI,y=Result, col=Incumbency)) + geom_smooth(method = "lm", fill = NA) + geom_point(data=df,aes(x=PVI,y=Result, col=Incumbency))
+```
+
+### Results
+
+When we look at the model that only factors in PVI, we see that it performed slightly better overall compared to the model that incorporated incumbency, with a RSE of 8.5 instead of 9.2 (This is still not great given that people describe the three point polling error in 2016 to be a blunder). It made relatively accurate guesses for Colorado (predicting a win and only being off by 3 points) and a loss for North Carolina (being off by about a point) however it significantly underestimated the results of the Arizona election (being off by 11 points) and significantly overestimating the results of the Maine election (being off by a 18 points). 
+
+When we factor in incumbency we see that this second model does much better in Maine and only overestimating by three points, perhaps better accounting for Susan Collins' incumbency. However it makes the opposite mistake in Colorado and underestimates the results by 17 points, perhaps giving Gardner too much credit for the strength of his incumbency. Overall it doesn't seem to be consistent enough to be useful as a predictor, at least in the absence of additional information.
+
+To the credit of both models, they both seem to beat the conventional wisdom for North Carolina, albeit to differing degrees of accuracy (PVI overestimated the results by a point whereas the PVI+Incumbency model underestimated the results by about 11 points). On the flip side they both underestimated the results of the Arizona election by 11 and 22 points respectively. Given that we can't cherry pick the results we like after the fact, our model leaves much to be desired overall if we wanted to try to beat the pollsters with it.
+
+That being said, how did our models fare against the predictions made elsewhere?
+
+## Comparing Performance to FiveThirtyEight
+
+```{r}
+df$Residuals.538 <- round(df$X538.Expected.Result - df$Result,2)
+rse.538 <- sqrt(sum(df$Residuals.538^2,na.rm=T)/(length(df[,1])-2))
+
+summary(lm('Result ~ Expected.Result.PVI',df))
+summary(lm('Result ~ Expected.Result.Incumbency',df))
+summary(lm('Result ~ X538.Expected.Result',df))
+
+ggplot(df,aes(x=Expected.Result.PVI ,y=Result))  + geom_point() + geom_smooth(method = "lm", fill = NA)
+ggplot(df,aes(x=Expected.Result.Incumbency ,y=Result,col=Incumbency))  + geom_point() + geom_smooth(method = "lm", fill = NA)
+ggplot(df,aes(x=X538.Expected.Result ,y=Result))  + geom_point() + geom_smooth(method = "lm", fill = NA)
+
+
+```
+
+### Results
+
+As it will no doubt come as a shock to you, a simple regression model using a one or two variables trained on a manually assembled dataset is no match for the minds over at [FiveThirtyEight](https://projects.fivethirtyeight.com/2020-election-forecast/senate/) and their model (This comparison was done against their Deluxe model, which combines polling, fundraising, past voting behavior, and more).
+
+In order to quantitatively compare the models, we can perform another regression, this time comparing the expected results (based on the model in question) and the actual results. If we run these calculations for each model, we see that the PVI, PVI+Incumbency, and 538 models have $R^2$ values of .85, .83 and .94 and RSEs of 8.5, 9.1, and 5.1 respectively.
+
+It shouldn't surprise us that theirs outperforms mine given that their model most likely includes all the information mine is capturing as well as additional information that mine isn't privy to. It would be interesting to see how my models compare to all three of FiveThirtyEight's models (They released three this cycle: Lite, Classic, and Deluxe, incorporating different levels of complexity. Lite uses just polling data, and Classic & Deluxe add additional variables on top of that). If I wanted a more even playing field pitting polls against PVI, it may have been beneficial to have pitted my models against their Lite model. But alas I was hoping for a compelling David vs Goliath narrative that didn't quite pan out. 
+
+## Conclusion
+
+I think one of the important takeaways here is that its important to differentiate between a fundamentally sound model and one that happens to get lucky. I'm sure if I had spent enough time creating different models I would end up with one that happened to predict the winner of all the key senate races. I could have then taken to Twitter, tagged Nate Silver in a tweet and said "AHA! Your model gave democrats a 75 percent chance of taking the senate but my model said otherwise and it turns out they didn't take the senate after all therefore my model is superior and I'm a statistical wizard!". However said model might not actually hold up under scrutiny, and it might not generalize to future elections in the way a fundamentally robust model would. This would be a bad model.  
+
+It is important to note that I'm playing a little fast and loose with the notion of "right" and "wrong" here given that regression is inherently probabilistic. A regression model such as this doesn't just predict a specific value, it predicts a distribution centered about some value, although ideally it seeks to minimize the variance of this distribution. So as long as the outcomes are within the reasonable bounds of our prediction intervals (i.e. results that should only happen 1% of the time not happening 50% of the time), we could say that our regression model is doing reasonably well, even if it isn't hitting its target exactly on the bullseye every time.
+
+While my models did seem to beat the conventional wisdom in a couple circumstances, they seemed to be wrong about as often as they were right (at least in terms of predicting a winner). In the case of my models, they seem to have identified a broad trend in behavior, but don't capture enough information to be able to be used for particularly accurate predictions.
+
+At the end of the day, it should come as a comfort to get some vindication that elections come down to more than just prior voting habits (PVI is essentially a weighted aggregate of past election trends for a given state or congressional district). Our regression analysis would indicate that it does in fact matter who campaigns choose to run and that how well they run their campaign does affect the outcome, and that elections are in fact not predetermined. The fact that Sen. Collins has been in the senate for almost as long as I've been alive despite Maine consistently voting for Democrats in that time is a testament to her skill as a politician and a campaigner (and I say that as someone who dislikes Sen. Collins immensely, politically speaking). She did face a closer election this time around than in 2014, but she didn't seem particularly encumbered by the state PVI, nor did she seem encumbered by the fact that President Trump lost Maine by about ten points at the same time as she won by about seven. 
+
+## Future ideas
+
+One of the lingering questions I have is whether or not we could have improved upon our Incumbency regression with some more information. For instance Sen. Gardner only served one term and won his election by two points, whereas Sen. Collins has been in the senate since 1997 and won her last reelection by 37 points (in a state that voted for Obama by 16 points the presidential cycle before). Sen. McSally was appointed to fill John McCain's recently vacated seat (by way of John Kyl's resignation from the seat in 2018) despite having just lost a senate campaign for the other Arizona seat that year, and Sen. Jones won in an upset in a special election in Alabama against someone who may or may not have been a pedophile. Surely it would not be unreasonable to weigh these candidates differently, and perhaps there would be a way to better quantify the strength of a particular incumbent's incumbency that would have resulted in better predictions. 
+
+Additionally, maybe there are other variables that could be captured to use in tandem with PVI and/or Incumbency to improve the model. I would think there would ideally be some way to capture the general level of enthusiasm around a candidate, as you would hope it would make a difference if parties ran candidates that people were actually interested and excited about as opposed to cookie-cutter partisan candidates. Some metric around small dollar donations and/or fundraising come to mind, although given the disappointing congressional results democrats had relative to their fundraising against republicans, I'm not inclined to believe that its a particularly fruitful line of investigation (and from what I understand, the political science literature isn't convinced of it either). Perhaps there are social media or search engine metrics that could be captured to measure engagement online, although there are likely issues of sampling bias that would have to be addressed for that to be viable (See [this](https://www.pewresearch.org/fact-tank/2019/10/23/a-small-group-of-prolific-users-account-for-a-majority-of-political-tweets-sent-by-u-s-adults/) study by Pew Resarch on the shortcomings of translating the Twitterverse to reality). 
+
+## Postface
+
+If you've made it this far, congratulations and thank you for bearing with me. What did you think? Did you love it? Did you hate it? Do you want to hire me to run your next campaign for office? Let me know in the comments so I can learn and grow. 
